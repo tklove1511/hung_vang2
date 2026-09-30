@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Hứng Vàng</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c2a2b;
+    --panel: #f6efe0;
+    --panel-ink: #14211f;
+    --panel-sub: #5b6a64;
+    --accent: #f2a541;
+    --accent-ink: #2a1a05;
+    --danger: #c8402f;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #071a1b;
+      --panel: #17302d;
+      --panel-ink: #f6efe0;
+      --panel-sub: #a9b8b0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #071a1b;
+    --panel: #17302d;
+    --panel-ink: #f6efe0;
+    --panel-sub: #a9b8b0;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--panel-ink);
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap { height: 100%; display: flex; align-items: center; justify-content: center; }
+  #stage { position: relative; overflow: hidden; border-radius: 14px; touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  .hud {
+    position: absolute; left: 0; right: 0; top: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 12px 16px; pointer-events: none; color: #f6efe0;
+  }
+  .score { font-weight: 800; font-size: 34px; line-height: 1; }
+  .score small { display: block; font-weight: 500; font-size: 12px; opacity: .7; margin-top: 4px; }
+  .lives { font-size: 22px; letter-spacing: 3px; color: var(--accent); }
+  .lives .lost { color: rgba(246,239,224,.25); }
+  .author {
+    position: absolute; right: 12px; bottom: 10px;
+    font-size: 11px; font-weight: 500; color: rgba(246,239,224,.35);
+    pointer-events: none; letter-spacing: 0.5px;
+  }
+
+  .overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(7,26,27,.55); padding: 24px;
+  }
+  .overlay[hidden] { display: none; }
+  .card {
+    background: var(--panel); color: var(--panel-ink);
+    border-radius: 18px; padding: 26px 24px; width: 100%; max-width: 300px; text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+  .card h1 { margin: 0 0 8px; font-size: 32px; font-weight: 800; line-height: 1.1; }
+  .card p { margin: 0 0 18px; font-size: 15px; line-height: 1.5; color: var(--panel-sub); }
+  .card .big { font-size: 44px; font-weight: 800; color: var(--panel-ink); line-height: 1; margin: 6px 0; }
+  .card .best { margin: 0 0 18px; font-size: 14px; color: var(--panel-sub); }
+  button {
+    font: inherit; font-weight: 800; font-size: 17px;
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: 12px; padding: 14px 28px; width: 100%; cursor: pointer;
+  }
+  button:active { transform: scale(.98); }
+  button:focus-visible { outline: 3px solid var(--panel-ink); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+
+    <div class="hud" aria-live="polite">
+      <div class="score"><span id="score">0</span><small id="level">Cấp 1</small></div>
+      <div class="lives" id="lives">♥♥♥</div>
+    </div>
+    <div class="author">Đào Trung</div>
+
+    <div class="overlay" id="startScreen">
+      <div class="card">
+        <h1>Hứng Vàng</h1>
+        <p>Kéo ngón tay để di chuyển thúng. Hứng bạc (+10), vàng (+50), kim cương (+100). Tránh đá rơi!</p>
+        <button id="playBtn">Chơi</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="overScreen" hidden>
+      <div class="card">
+        <h1>Hết lượt</h1>
+        <div class="big" id="finalScore">0</div>
+        <p class="best" id="bestText">Kỷ lục: 0</p>
+        <button id="againBtn">Chơi lại</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var LW = 360, LH = 640;
+  var stage = document.getElementById('stage');
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var livesEl = document.getElementById('lives');
+  var startScreen = document.getElementById('startScreen');
+  var overScreen = document.getElementById('overScreen');
+  var finalScoreEl = document.getElementById('finalScore');
+  var bestTextEl = document.getElementById('bestText');
+
+  var scale = 1, dpr = 1;
+
+  function resize() {
+    var wrap = document.getElementById('wrap');
+    var aw = wrap.clientWidth, ah = wrap.clientHeight;
+    scale = Math.min(aw / LW, ah / LH);
+    dpr = window.devicePixelRatio || 1;
+    stage.style.width = Math.floor(LW * scale) + 'px';
+    stage.style.height = Math.floor(LH * scale) + 'px';
+    cv.width = Math.round(LW * scale * dpr);
+    cv.height = Math.round(LH * scale * dpr);
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- state ----------
+  var state = 'ready'; // ready | play | over
+  var score, lives, level, items, spawnTimer, shake, flash, time, floats;
+  var player = { x: LW / 2, target: LW / 2, y: LH - 92, w: 84, h: 34 };
+  var best = 0;
+  try { best = parseInt(localStorage.getItem('hungvang_best') || '0', 10) || 0; } catch (e) {}
+
+  function reset() {
+    score = 0; lives = 3; level = 1; items = []; floats = []; spawnTimer = 0.4; shake = 0; flash = 0;
+    player.x = player.target = LW / 2;
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    var prevTotal = 0; for (var l = 1; l < level; l++) prevTotal += pointsForLevel(l);
+    var need = pointsForLevel(level);
+    var cur = score - prevTotal;
+    levelEl.textContent = 'Cấp ' + level + ' (' + cur + '/' + need + ')';
+    var h = '';
+    for (var i = 0; i < 3; i++) h += i < lives ? '♥' : '<span class="lost">♥</span>';
+    livesEl.innerHTML = h;
+  }
+
+  // ---------- audio ----------
+  var actx = null;
+  function beep(freq, dur, type, vol) {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      var o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.value = vol || 0.06;
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+      o.connect(g); g.connect(actx.destination);
+      o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  // ---------- level thresholds ----------
+  // lv1: 1000, lv2: 2000, lv3: 4000, lv4: 8000 ...
+  function pointsForLevel(lv) { return 1000 * Math.pow(2, lv - 1); }
+  function calcLevel(pts) {
+    var lv = 1, total = 0;
+    while (true) {
+      total += pointsForLevel(lv);
+      if (pts < total) return lv;
+      lv++;
+    }
+  }
+
+  // ---------- spawn ----------
+  function spawn() {
+    var rockChance = Math.min(0.42, 0.2 + level * 0.02);
+    var roll = Math.random();
+    var type;
+    if (roll < rockChance) {
+      type = 'rock';
+    } else {
+      // silver 60%, gold 28%, diamond 12%
+      var loot = Math.random();
+      if (loot < 0.60) type = 'silver';
+      else if (loot < 0.88) type = 'gold';
+      else type = 'diamond';
+    }
+
+    var r = type === 'rock' ? 16 + Math.random() * 8
+          : type === 'diamond' ? 15
+          : type === 'gold' ? 14 : 12;
+
+    var it = {
+      type: type,
+      x: r + Math.random() * (LW - 2 * r),
+      y: -r,
+      r: r,
+      vy: (150 + Math.random() * 40) * Math.pow(1.03, level - 1),
+      rot: Math.random() * 6.28,
+      spin: (Math.random() - 0.5) * 3,
+      pts: []
+    };
+    if (type === 'rock') {
+      var n = 7;
+      for (var i = 0; i < n; i++) {
+        var a = (i / n) * 6.28;
+        var rr = r * (0.78 + Math.random() * 0.3);
+        it.pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+      }
+    }
+    items.push(it);
+  }
+
+  // ---------- update ----------
+  function update(dt) {
+    time += dt;
+    updateStars(dt);
+    if (state !== 'play') return;
+
+    player.x += (player.target - player.x) * Math.min(1, dt * 16);
+    var half = player.w / 2;
+    player.x = Math.max(half, Math.min(LW - half, player.x));
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawn();
+      spawnTimer = Math.max(0.25, 0.85 / Math.pow(1.03, level - 1)) * (0.7 + Math.random() * 0.6);
+    }
+
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      it.y += it.vy * dt;
+      it.rot += it.spin * dt;
+
+      var inX = Math.abs(it.x - player.x) < player.w / 2 + it.r * 0.2;
+      var inY = it.y + it.r > player.y && it.y < player.y + 22;
+      if (inX && inY) {
+        if (it.type !== 'rock') {
+          var pts = it.type === 'diamond' ? 100 : it.type === 'gold' ? 50 : 10;
+          score += pts;
+          var nl = calcLevel(score);
+          if (nl !== level) { level = nl; beep(1200, 0.25, 'triangle', 0.07); }
+          if (it.type === 'diamond') { beep(1320, 0.15, 'sine', 0.08); beep(1760, 0.12, 'sine', 0.06); }
+          else if (it.type === 'gold') beep(1050, 0.1, 'sine', 0.07);
+          else beep(880, 0.08, 'sine', 0.06);
+          // floating score text
+          floats.push({ x: it.x, y: it.y, text: '+' + pts, life: 0.7, color: it.type === 'diamond' ? '#7fdbff' : it.type === 'gold' ? '#f2a541' : '#d0d0d0' });
+        } else {
+          lives--;
+          shake = 0.3; flash = 0.25;
+          beep(120, 0.3, 'sawtooth', 0.08);
+        }
+        items.splice(i, 1);
+        updateHud();
+        if (lives <= 0) { gameOver(); return; }
+        continue;
+      }
+      if (it.y - it.r > LH) items.splice(i, 1);
+    }
+
+    if (shake > 0) shake -= dt;
+    if (flash > 0) flash -= dt;
+    for (var j = floats.length - 1; j >= 0; j--) {
+      floats[j].life -= dt;
+      floats[j].y -= 60 * dt;
+      if (floats[j].life <= 0) floats.splice(j, 1);
+    }
+  }
+
+  function gameOver() {
+    state = 'over';
+    if (score > best) {
+      best = score;
+      try { localStorage.setItem('hungvang_best', String(best)); } catch (e) {}
+    }
+    finalScoreEl.textContent = score;
+    bestTextEl.textContent = 'Kỷ lục: ' + best;
+    overScreen.hidden = false;
+  }
+
+  // ---------- stars ----------
+  var stars = [];
+  function initStars() {
+    stars = [];
+    for (var i = 0; i < 120; i++) {
+      stars.push({
+        x: Math.random() * LW,
+        y: Math.random() * LH,
+        r: 0.4 + Math.random() * 1.8,
+        speed: 8 + Math.random() * 25,
+        twinkleSpeed: 1.5 + Math.random() * 3,
+        twinkleOffset: Math.random() * 6.28,
+        brightness: 0.4 + Math.random() * 0.6
+      });
+    }
+    // a few shooting stars
+    for (var j = 0; j < 3; j++) {
+      stars.push({
+        x: Math.random() * LW,
+        y: Math.random() * LH * 0.5,
+        r: 1.2,
+        speed: 80 + Math.random() * 60,
+        twinkleSpeed: 0,
+        twinkleOffset: 0,
+        brightness: 1,
+        shooting: true,
+        vx: -30 - Math.random() * 40,
+        tail: 20 + Math.random() * 15
+      });
+    }
+  }
+  initStars();
+
+  // ---------- draw ----------
+  function drawBackground() {
+    // sky gradient
+    var g = ctx.createLinearGradient(0, 0, 0, LH);
+    g.addColorStop(0, '#05101a');
+    g.addColorStop(0.4, '#0a1a2e');
+    g.addColorStop(0.75, '#0c2a2b');
+    g.addColorStop(1, '#1b5a4e');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, LW, LH);
+
+    // stars
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      if (s.shooting) {
+        // shooting star
+        var alpha = 0.3 + Math.abs(Math.sin(time * 0.4 + i)) * 0.7;
+        if (alpha < 0.35) continue; // hidden most of the time
+        ctx.save();
+        var sg = ctx.createLinearGradient(s.x, s.y, s.x + s.tail, s.y - s.tail * 0.3);
+        sg.addColorStop(0, 'rgba(255,255,255,' + alpha + ')');
+        sg.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.strokeStyle = sg;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + s.tail, s.y - s.tail * 0.3);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
+        ctx.beginPath(); ctx.arc(s.x, s.y, 1.5, 0, 6.283); ctx.fill();
+        ctx.restore();
+      } else {
+        // twinkling star
+        var tw = Math.sin(time * s.twinkleSpeed + s.twinkleOffset) * 0.4 + 0.6;
+        var alpha2 = s.brightness * tw;
+        ctx.fillStyle = 'rgba(255,255,255,' + alpha2 + ')';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.283); ctx.fill();
+        // glow for bigger stars
+        if (s.r > 1.2) {
+          ctx.fillStyle = 'rgba(200,220,255,' + (alpha2 * 0.2) + ')';
+          ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 3, 0, 6.283); ctx.fill();
+        }
+      }
+    }
+
+    // moon
+    ctx.fillStyle = 'rgba(246,239,224,.85)';
+    ctx.beginPath(); ctx.arc(280, 80, 28, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#0a1a2e';
+    ctx.beginPath(); ctx.arc(291, 73, 25, 0, 6.283); ctx.fill();
+    // moon glow
+    ctx.fillStyle = 'rgba(246,239,224,.06)';
+    ctx.beginPath(); ctx.arc(280, 80, 55, 0, 6.283); ctx.fill();
+
+    // water lines
+    ctx.strokeStyle = 'rgba(246,239,224,.10)';
+    ctx.lineWidth = 1.5;
+    for (var row = 0; row < 5; row++) {
+      var wy = LH - 55 + row * 13;
+      ctx.beginPath();
+      for (var wx = 0; wx <= LW; wx += 8) {
+        var wyy = wy + Math.sin(wx * 0.05 + time * 1.5 + row) * 3;
+        if (wx === 0) ctx.moveTo(wx, wyy); else ctx.lineTo(wx, wyy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  function updateStars(dt) {
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      s.y += s.speed * dt;
+      if (s.shooting) {
+        s.x += s.vx * dt;
+        if (s.y > LH + 10 || s.x < -50) {
+          s.x = LW * 0.3 + Math.random() * LW * 0.7;
+          s.y = -10 - Math.random() * 50;
+        }
+      } else {
+        if (s.y > LH + 5) {
+          s.y = -5;
+          s.x = Math.random() * LW;
+        }
+      }
+    }
+  }
+
+  function drawBasket() {
+    var x = player.x, y = player.y, w = player.w, h = player.h;
+    ctx.save();
+    ctx.translate(x, y);
+    // bowl
+    ctx.fillStyle = '#a5672c';
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, 0);
+    ctx.quadraticCurveTo(0, h * 2, w / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+    // weave
+    ctx.strokeStyle = 'rgba(42,26,5,.35)';
+    ctx.lineWidth = 1.5;
+    for (var i = -3; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * (w / 8), 0);
+      ctx.quadraticCurveTo(i * (w / 16), h * 0.9, i * (w / 24), h * 0.95);
+      ctx.stroke();
+    }
+    // rim
+    ctx.fillStyle = '#f2a541';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w / 2, 6, 0, 0, 6.283);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawSilver(it) {
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    ctx.scale(Math.abs(Math.cos(it.rot)) * 0.5 + 0.5, 1);
+    ctx.fillStyle = '#c0c0c0';
+    ctx.beginPath(); ctx.arc(0, 0, it.r, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, it.r - 2, 0, 6.283); ctx.stroke();
+    ctx.fillStyle = '#555';
+    ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('10', 0, 1);
+    ctx.restore();
+  }
+
+  function drawGold(it) {
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    ctx.scale(Math.abs(Math.cos(it.rot)) * 0.5 + 0.5, 1);
+    ctx.fillStyle = '#f2a541';
+    ctx.beginPath(); ctx.arc(0, 0, it.r, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = '#b87a1c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, it.r - 2, 0, 6.283); ctx.stroke();
+    ctx.fillStyle = '#6b3a00';
+    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('50', 0, 1);
+    ctx.restore();
+  }
+
+  function drawDiamond(it) {
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    var s = it.r;
+    var pulse = 1 + Math.sin(time * 6) * 0.08;
+    ctx.scale(pulse, pulse);
+    // glow
+    ctx.shadowColor = '#7fdbff'; ctx.shadowBlur = 12;
+    // diamond shape
+    ctx.fillStyle = '#7fdbff';
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.lineTo(s * 0.7, -s * 0.2);
+    ctx.lineTo(s * 0.5, s * 0.8);
+    ctx.lineTo(-s * 0.5, s * 0.8);
+    ctx.lineTo(-s * 0.7, -s * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // facets
+    ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.7, -s * 0.2); ctx.lineTo(0, s * 0.3); ctx.lineTo(s * 0.7, -s * 0.2);
+    ctx.moveTo(0, -s); ctx.lineTo(0, s * 0.3);
+    ctx.moveTo(-s * 0.35, -s * 0.6); ctx.lineTo(-s * 0.5, s * 0.8);
+    ctx.moveTo(s * 0.35, -s * 0.6); ctx.lineTo(s * 0.5, s * 0.8);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawFloats() {
+    for (var i = 0; i < floats.length; i++) {
+      var f = floats[i];
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, f.life / 0.7);
+      ctx.fillStyle = f.color;
+      ctx.font = 'bold 18px "Be Vietnam Pro", sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.restore();
+    }
+  }
+
+  function drawRock(it) {
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    ctx.rotate(it.rot);
+    ctx.fillStyle = '#7d8a86';
+    ctx.strokeStyle = '#c8402f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < it.pts.length; i++) {
+      var p = it.pts[i];
+      if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+    }
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
+    drawBackground();
+    for (var i = 0; i < items.length; i++) {
+      var t = items[i].type;
+      if (t === 'silver') drawSilver(items[i]);
+      else if (t === 'gold') drawGold(items[i]);
+      else if (t === 'diamond') drawDiamond(items[i]);
+      else drawRock(items[i]);
+    }
+    drawBasket();
+    drawFloats();
+    ctx.restore();
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(200,64,47,' + (flash * 1.4) + ')';
+      ctx.fillRect(0, 0, LW, LH);
+    }
+  }
+
+  // ---------- loop ----------
+  var last = performance.now();
+  time = 0; items = []; floats = []; score = 0; lives = 3; level = 1; shake = 0; flash = 0; spawnTimer = 0;
+  function frame(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- input ----------
+  function setTarget(clientX) {
+    var rect = stage.getBoundingClientRect();
+    player.target = (clientX - rect.left) / scale;
+  }
+  cv.addEventListener('pointerdown', function (e) { setTarget(e.clientX); });
+  cv.addEventListener('pointermove', function (e) { setTarget(e.clientX); });
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') player.target -= 60;
+    if (e.key === 'ArrowRight') player.target += 60;
+  });
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  function start() {
+    reset();
+    state = 'play';
+    startScreen.hidden = true;
+    overScreen.hidden = true;
+    beep(660, 0.1, 'sine', 0.05);
+  }
+  document.getElementById('playBtn').addEventListener('click', start);
+  document.getElementById('againBtn').addEventListener('click', start);
+
+  updateHud();
+})();
+</script>
+</body>
+</html>
